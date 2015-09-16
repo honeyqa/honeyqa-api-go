@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/julienschmidt/httprouter"
 	"github.com/streadway/amqp"
-	"io/ioutil"
 	"log"
 	"net/http"
 )
@@ -23,11 +22,11 @@ func connectRabbit() (s rabbit_session) {
 	failOnError(err, "Failed to open a channel")
 	q, err := ch.QueueDeclare(
 		"oqa_log_queue", // name
-		true,                // durable
-		false,               // delete when unused
-		false,               // exclusive
-		false,               // no-wait
-		nil,                 // arguments
+		true,            // durable
+		false,           // delete when unused
+		false,           // exclusive
+		false,           // no-wait
+		nil,             // arguments
 	)
 	failOnError(err, "Failed to declare a queue")
 	return rabbit_session{conn, ch, q}
@@ -35,8 +34,18 @@ func connectRabbit() (s rabbit_session) {
 
 func InsertLog(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// TODO : check valid json (is json parceable)
-	body, _ := ioutil.ReadAll(r.Body)
-	// TODO : return http code if log inserted to queue
+	decoder := json.NewDecoder(r.Body)
+	var j map[string]interface{}
+	err := decoder.Decode(&j)
+	if err != nil {
+		w.WriteHeader(400)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("{\"msg\":\"not valid json\"}"))
+	} else {
+		// TODO : return http code if log inserted to queue
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("{\"msg\":\"data inserted\"}"))
+	}
 }
 
 func failOnError(err error, msg string) {
@@ -50,6 +59,6 @@ var rabbit = connectRabbit()
 
 func main() {
 	router := httprouter.New()
-	router.POST("/log/insert", InsertLog)
+	router.POST("/crash", InsertLog)
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
