@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"github.com/julienschmidt/httprouter"
 	"github.com/streadway/amqp"
+	"io/ioutil"
 	"log"
 	"net/http"
 )
 
 type rabbit_session struct {
-	*amqp.Connection
-	*amqp.Channel
-	amqp.Queue
+	conn *amqp.Connection
+	ch   *amqp.Channel
+	q    amqp.Queue
 }
 
 func connectRabbit() (s rabbit_session) {
@@ -33,7 +34,6 @@ func connectRabbit() (s rabbit_session) {
 }
 
 func InsertLog(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	// TODO : check valid json (is json parceable)
 	decoder := json.NewDecoder(r.Body)
 	var j map[string]interface{}
 	err := decoder.Decode(&j)
@@ -42,9 +42,31 @@ func InsertLog(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("{\"msg\":\"not valid json\"}"))
 	} else {
-		// TODO : return http code if log inserted to queue
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("{\"msg\":\"data inserted\"}"))
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(500)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("{\"msg\":\"failed to read data\"}"))
+		} else {
+			err = rabbit.ch.Publish(
+				"",            // exchange
+				rabbit.q.Name, // routing key
+				false,         // mandatory
+				false,         // immediate
+				amqp.Publishing{
+					ContentType: "text/plain",
+					Body:        body,
+				},
+			)
+			if err != nil {
+				w.WriteHeader(500)
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte("{\"msg\":\"failed to insert data\"}"))
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte("{\"msg\":\"data inserted\"}"))
+			}
+		}
 	}
 }
 
