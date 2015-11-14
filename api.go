@@ -8,7 +8,6 @@ import (
 	"github.com/julienschmidt/httprouter"
 	"github.com/streadway/amqp"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
@@ -95,7 +94,7 @@ func SessionCount(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 					if r2 != 0 {
 						w.WriteHeader(200)
 						w.Header().Set("Content-Type", "application/json")
-						w.Write([]byte("{\"msg\":\"parsed\"}"))
+						w.Write([]byte("{\"msg\":\"success\"}"))
 					} else {
 						w.WriteHeader(500)
 						w.Header().Set("Content-Type", "application/json")
