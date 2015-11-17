@@ -16,26 +16,46 @@ import (
 
 // RabbitMQ
 type rabbit_session struct {
-	conn *amqp.Connection
-	ch   *amqp.Channel
-	q    amqp.Queue
+	conn       *amqp.Connection
+	ch         *amqp.Channel
+	android_q  amqp.Queue
+	android_nq amqp.Queue
+	ios_q      amqp.Queue
 }
 
 func connectRabbit() (s rabbit_session) {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	conn, err := amqp.Dial("amqp://id:pw@host:5672/")
 	failOnError(err, "Failed to connect to RabbitMQ")
 	ch, err := conn.Channel()
 	failOnError(err, "Failed to open a channel")
-	q, err := ch.QueueDeclare(
-		"oqa_log_queue", // name
-		true,            // durable
-		false,           // delete when unused
-		false,           // exclusive
-		false,           // no-wait
-		nil,             // arguments
+	aq, err := ch.QueueDeclare(
+		"oqa_android_log_queue", // name
+		true,  // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		nil,   // arguments
 	)
 	failOnError(err, "Failed to declare a queue")
-	return rabbit_session{conn, ch, q}
+	anq, err := ch.QueueDeclare(
+		"oqa_android_native_log_queue", // name
+		true,  // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		nil,   // arguments
+	)
+	failOnError(err, "Failed to declare a queue")
+	iq, err := ch.QueueDeclare(
+		"oqa_ios_log_queue", // name
+		true,                // durable
+		false,               // delete when unused
+		false,               // exclusive
+		false,               // no-wait
+		nil,                 // arguments
+	)
+	failOnError(err, "Failed to declare a queue")
+	return rabbit_session{conn, ch, aq, anq, iq}
 }
 
 // Redis Pool
@@ -106,8 +126,42 @@ func SessionCount(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	}
 }
 
-func InsertLog(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	// TODO : JSON valid check then pass data to Queue
+func InsertAndroidLog(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	defer r.Body.Close()
+	data, err := parseJson(r.Body)
+	if err != nil {
+		w.WriteHeader(400)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("{\"msg\":\"not valid json\"}"))
+	} else {
+		resp, _ := json.Marshal(data)
+		rabbit.ch.Publish("", rabbit.android_q.Name, false, false, amqp.Publishing{
+			ContentType: "application/json",
+			Body:        resp,
+		})
+		w.WriteHeader(200)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("{\"msg\":\"success\"}"))
+	}
+}
+
+func InsertAndroidNativeLog(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	defer r.Body.Close()
+	data, err := parseJson(r.Body)
+	if err != nil {
+		w.WriteHeader(400)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("{\"msg\":\"not valid json\"}"))
+	} else {
+		resp, _ := json.Marshal(data)
+		rabbit.ch.Publish("", rabbit.android_nq.Name, false, false, amqp.Publishing{
+			ContentType: "application/json",
+			Body:        resp,
+		})
+		w.WriteHeader(200)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("{\"msg\":\"success\"}"))
+	}
 }
 
 func parseJson(b io.Reader) (d map[string]interface{}, err error) {
@@ -135,6 +189,12 @@ func main() {
 	// iOS
 	// Session
 	router.POST("/api/ios/client/session", SessionCount)
-	// router.POST("/api/ios/client/exception", InsertLog)
-	log.Fatal(http.ListenAndServe(":8080", router))
+	// Android
+	// Session
+	router.POST("/api/v2/client/session", SessionCount)
+	// Exception
+	router.POST("/api/v2/client/exception", InsertAndroidLog)
+	router.POST("/api/v2/client/exception/native", InsertAndroidNativeLog)
+	// HTTPS
+	log.Fatal(http.ListenAndServeTLS(":443", "crt.crt", "key.key", router))
 }
