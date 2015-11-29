@@ -18,9 +18,8 @@ import (
 type rabbit_session struct {
 	conn       *amqp.Connection
 	ch         *amqp.Channel
-	android_q  amqp.Queue
+	mobile_q   amqp.Queue
 	android_nq amqp.Queue
-	ios_q      amqp.Queue
 }
 
 func connectRabbit() (s rabbit_session) {
@@ -28,8 +27,8 @@ func connectRabbit() (s rabbit_session) {
 	failOnError(err, "Failed to connect to RabbitMQ")
 	ch, err := conn.Channel()
 	failOnError(err, "Failed to open a channel")
-	aq, err := ch.QueueDeclare(
-		"oqa_android_log_queue", // name
+	mq, err := ch.QueueDeclare(
+		"oqa_mobile_log_queue", // android & iOS
 		true,  // durable
 		false, // delete when unused
 		false, // exclusive
@@ -46,16 +45,7 @@ func connectRabbit() (s rabbit_session) {
 		nil,   // arguments
 	)
 	failOnError(err, "Failed to declare a queue")
-	iq, err := ch.QueueDeclare(
-		"oqa_ios_log_queue", // name
-		true,                // durable
-		false,               // delete when unused
-		false,               // exclusive
-		false,               // no-wait
-		nil,                 // arguments
-	)
-	failOnError(err, "Failed to declare a queue")
-	return rabbit_session{conn, ch, aq, anq, iq}
+	return rabbit_session{conn, ch, mq, anq}
 }
 
 // Redis Pool
@@ -126,7 +116,7 @@ func SessionCount(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	}
 }
 
-func InsertAndroidLog(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func InsertMobileLog(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	defer r.Body.Close()
 	data, err := parseJson(r.Body)
 	if err != nil {
@@ -135,7 +125,7 @@ func InsertAndroidLog(w http.ResponseWriter, r *http.Request, p httprouter.Param
 		w.Write([]byte("{\"msg\":\"not valid json\"}"))
 	} else {
 		resp, _ := json.Marshal(data)
-		rabbit.ch.Publish("", rabbit.android_q.Name, false, false, amqp.Publishing{
+		rabbit.ch.Publish("", rabbit.mobile_q.Name, false, false, amqp.Publishing{
 			ContentType: "application/json",
 			Body:        resp,
 		})
@@ -189,11 +179,13 @@ func main() {
 	// iOS
 	// Session
 	router.POST("/api/ios/client/session", SessionCount)
+	// Exception
+	router.POST("/api/ios/client/exception", InsertMobileLog)
 	// Android
 	// Session
 	router.POST("/api/v2/client/session", SessionCount)
 	// Exception
-	router.POST("/api/v2/client/exception", InsertAndroidLog)
+	router.POST("/api/v2/client/exception", InsertMobileLog)
 	router.POST("/api/v2/client/exception/native", InsertAndroidNativeLog)
 	// HTTPS
 	log.Fatal(http.ListenAndServeTLS(":443", "crt.crt", "key.key", router))
